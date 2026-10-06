@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Watch a gemstone crab, sand crabs, and ammonite crabs fight at the same time, with a live XP graph and a speed control.">
+  <meta name="theme-color" content="#14110e">
+  <title>Crab XP — gemstone, sand, and ammonite crabs</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#stage">Skip to the fights</a>
+  <div class="game">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="14" fill="#100e0c"/>
+          <ellipse cx="16" cy="30" rx="9" ry="7" fill="#c9843a"/>
+          <ellipse cx="48" cy="30" rx="9" ry="7" fill="#c9843a"/>
+          <ellipse cx="32" cy="36" rx="16" ry="13" fill="#e2b15a"/>
+          <polygon points="32,20 37,28 32,36 27,28" fill="#3ecfb4"/>
+          <circle cx="26" cy="34" r="2" fill="#1a1612"/>
+          <circle cx="38" cy="34" r="2" fill="#1a1612"/>
+        </svg>
+        <div>
+          <p class="eyebrow">Old School RuneScape</p>
+          <h1>Crab XP</h1>
+        </div>
+      </div>
+      <div class="clockblock">
+        <p class="clock" id="clock">0:00</p>
+        <p class="lead" id="lead">All three fights are on the same clock.</p>
+      </div>
+      <div class="race" aria-hidden="true">
+        <div class="race-row gem"><span id="race-gem"></span></div>
+        <div class="race-row sand"><span id="race-sand"></span></div>
+        <div class="race-row ammo"><span id="race-ammo"></span></div>
+      </div>
+    </header>
+
+    <div class="speedbar">
+      <button id="play" type="button">Pause</button>
+      <button id="step" type="button" title="Advance all three fights by one game tick">1 tick</button>
+      <button id="restart" type="button">Restart</button>
+      <label class="speed-label" for="simSpeed">Sim speed</label>
+      <input id="simSpeed" type="range" min="1" max="500" value="10" aria-describedby="speedNote">
+      <output id="speedReadout" for="simSpeed">10×</output>
+      <div class="chips" role="group" aria-label="Speed presets">
+        <button type="button" data-speed="1">1×</button>
+        <button type="button" data-speed="5">5×</button>
+        <button type="button" data-speed="10" aria-pressed="true">10×</button>
+        <button type="button" data-speed="25">25×</button>
+        <button type="button" data-speed="100">100×</button>
+        <button type="button" data-speed="500">500×</button>
+      </div>
+    </div>
+    <div class="speed-copy">
+      <p id="speedNote" class="speed-note">10×. One game hour takes 6 min.</p>
+      <p id="trouble" class="trouble" hidden></p>
+    </div>
+
+    <main id="stage" class="stage">
+      <section class="arena arena-gem" id="arena-gem" aria-labelledby="gem-title">
+        <div class="arena-top">
+          <h2 id="gem-title">Gemstone crab</h2>
+          <p class="xp-line"><strong id="gem-xp">0</strong> <span id="gem-skill">XP</span></p>
+          <p class="sub-line"><span id="gem-hitpoints">0</span> Hitpoints · <span id="gem-rate">0</span>/h so far</p>
+          <p class="penalty" id="gem-cut">XP reduced: 0</p>
+          <p class="goal" id="gem-goal" hidden></p>
+        </div>
+        <div class="scene">
+          <div class="fighter" id="gem-fighter"></div>
+          <div class="boss" id="gem-boss"></div>
+          <div class="floats" id="gem-floats"></div>
+          <p class="banner" id="gem-banner" hidden></p>
+        </div>
+        <dl class="mini">
+          <div><dt>Counted</dt><dd id="gem-dealt">0</dd></div>
+          <div><dt>Attacks</dt><dd id="gem-attacks">0</dd></div>
+          <div><dt>Idle</dt><dd id="gem-idle">0%</dd></div>
+        </dl>
+      </section>
+
+      <section class="arena arena-sand" id="arena-sand" aria-labelledby="sand-title">
+        <div class="arena-top">
+          <h2 id="sand-title">Sand crabs</h2>
+          <p class="xp-line"><strong id="sand-xp">0</strong> <span id="sand-skill">XP</span></p>
+          <p class="sub-line"><span id="sand-hitpoints">0</span> Hitpoints · <span id="sand-rate">0</span>/h so far</p>
+          <p class="penalty" id="sand-lost">Overhit XP lost: 0</p>
+          <p class="goal" id="sand-goal" hidden></p>
+        </div>
+        <div class="scene">
+          <div class="fighter" id="sand-fighter"></div>
+          <div class="crab-row" id="sand-row"></div>
+          <div class="floats" id="sand-floats"></div>
+          <p class="banner" id="sand-banner" hidden></p>
+        </div>
+        <dl class="mini">
+          <div><dt>Counted</dt><dd id="sand-dealt">0</dd></div>
+          <div><dt>Wasted</dt><dd id="sand-over">0</dd></div>
+          <div><dt>Kills</dt><dd id="sand-kills">0</dd></div>
+          <div><dt>Idle</dt><dd id="sand-idle">0%</dd></div>
+        </dl>
+      </section>
+
+      <section class="arena arena-ammo" id="arena-ammo" aria-labelledby="ammo-title">
+        <div class="arena-top">
+          <h2 id="ammo-title">Ammonite crabs</h2>
+          <p class="xp-line"><strong id="ammo-xp">0</strong> <span id="ammo-skill">XP</span></p>
+          <p class="sub-line"><span id="ammo-hitpoints">0</span> Hitpoints · <span id="ammo-rate">0</span>/h so far</p>
+          <p class="penalty" id="ammo-lost">Overhit XP lost: 0</p>
+          <p class="goal" id="ammo-goal" hidden></p>
+        </div>
+        <div class="scene">
+          <div class="fighter" id="ammo-fighter"></div>
+          <div class="crab-row" id="ammo-row"></div>
+          <div class="floats" id="ammo-floats"></div>
+          <p class="banner" id="ammo-banner" hidden></p>
+        </div>
+        <dl class="mini">
+          <div><dt>Counted</dt><dd id="ammo-dealt">0</dd></div>
+          <div><dt>Wasted</dt><dd id="ammo-over">0</dd></div>
+          <div><dt>Kills</dt><dd id="ammo-kills">0</dd></div>
+          <div><dt>Idle</dt><dd id="ammo-idle">0%</dd></div>
+        </dl>
+      </section>
+    </main>
+
+    <section class="graph" aria-labelledby="graph-title">
+      <div class="graph-head">
+        <h2 id="graph-title">XP over time</h2>
+        <p class="legend">
+          <span><i class="swatch gem"></i>Gemstone</span>
+          <span><i class="swatch sand"></i>Sand</span>
+          <span><i class="swatch ammo"></i>Ammonite</span>
+        </p>
+      </div>
+      <svg id="chart" viewBox="0 0 720 180" role="img" aria-label="Style XP for the gemstone crab, sand crabs, and ammonite crabs"></svg>
+    </section>
+
+    <section class="deck" aria-label="Fight setup">
+      <form id="controls" autocomplete="off">
+        <div class="setup">
+          <div class="field">
+            <label for="maxhit">Max hit</label>
+            <div class="split">
+              <input id="maxhitRange" type="range" min="1" max="80" value="22" aria-label="Max hit slider">
+              <input id="maxhit" type="number" min="1" max="200" value="22" inputmode="numeric">
+            </div>
+          </div>
+          <label class="field">
+            <span>Attack speed</span>
+            <select id="weapon">
+              <option value="2">2 ticks — blowpipe</option>
+              <option value="3">3 ticks — darts</option>
+              <option value="4" selected>4 ticks — scimitar</option>
+              <option value="5">5 ticks — longsword</option>
+              <option value="6">6 ticks — godsword</option>
+              <option value="7">7 ticks</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Style</span>
+            <select id="style">
+              <option value="strength" selected>Strength</option>
+              <option value="attack">Attack</option>
+              <option value="defence">Defence</option>
+              <option value="controlled">Controlled</option>
+              <option value="ranged">Ranged</option>
+              <option value="longrange">Longrange</option>
+              <option value="magic">Magic</option>
+              <option value="defensive-magic">Defensive magic</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Sand crabs</span>
+            <input id="crabs" type="number" min="1" max="10" value="3" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>Ammonite crabs</span>
+            <input id="ammoCrabs" type="number" min="1" max="10" value="3" inputmode="numeric">
+          </label>
+        </div>
+
+        <div class="resets">
+          <div class="reset-pair gem">
+            <p class="reset-name">Gemstone reset</p>
+            <label class="field">
+              <span>Every (minutes)</span>
+              <input id="gemEvery" type="number" min="0" max="120" step="0.1" value="10" inputmode="decimal">
+            </label>
+            <label class="field">
+              <span>Takes (seconds)</span>
+              <input id="gemMove" type="number" min="0" max="120" step="0.1" value="20" inputmode="decimal">
+            </label>
+          </div>
+          <div class="reset-pair sand">
+            <p class="reset-name">Sand reset</p>
+            <label class="field">
+              <span>Every (minutes)</span>
+              <input id="sandEvery" type="number" min="0" max="120" step="0.1" value="10" inputmode="decimal">
+            </label>
+            <label class="field">
+              <span>Takes (seconds)</span>
+              <input id="sandReset" type="number" min="0" max="120" step="0.1" value="15" inputmode="decimal">
+            </label>
+          </div>
+          <div class="reset-pair ammo">
+            <p class="reset-name">Ammonite reset</p>
+            <label class="field">
+              <span>Every (minutes)</span>
+              <input id="ammoEvery" type="number" min="0" max="120" step="0.1" value="10" inputmode="decimal">
+            </label>
+            <label class="field">
+              <span>Takes (seconds)</span>
+              <input id="ammoReset" type="number" min="0" max="120" step="0.1" value="15" inputmode="decimal">
+            </label>
+          </div>
+        </div>
+        <p class="reset-note">Every is how long they stay aggressive. Takes is the time spent resetting. 0 skips that reset.</p>
+
+        <details class="more">
+          <summary>Accuracy and goal</summary>
+          <div class="more-grid">
+            <fieldset class="field span-all">
+              <legend>Accuracy</legend>
+              <div class="choice">
+                <label><input type="radio" name="accMode" value="full" checked> Always hit</label>
+                <label><input type="radio" name="accMode" value="custom"> Custom chance</label>
+                <label><input type="radio" name="accMode" value="levels"> From my level</label>
+              </div>
+              <small id="accuracyNote">Accuracy 100%. All three crabs have defence roll 640.</small>
+            </fieldset>
+            <label class="field" id="accuracyCustom" hidden>
+              <span>Hit chance (%)</span>
+              <input id="accuracy" type="number" min="0" max="100" step="0.1" value="95" inputmode="decimal">
+            </label>
+            <label class="field" id="levelField" hidden>
+              <span id="levelLabel">Attack level</span>
+              <input id="level" type="number" min="1" max="125" value="70" inputmode="numeric">
+            </label>
+            <label class="field" id="bonusField" hidden>
+              <span>Attack bonus</span>
+              <input id="bonus" type="number" min="-63" max="400" value="0" inputmode="numeric">
+            </label>
+            <label class="field" id="prayerField" hidden>
+              <span>Prayer</span>
+              <select id="prayerPreset">
+                <option value="1" selected>None</option>
+                <option value="1.15">15%</option>
+                <option value="1.2">20% Piety, Rigour</option>
+                <option value="1.25">25% Augury</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label class="field" id="prayerNumberField" hidden>
+              <span>Prayer multiplier</span>
+              <input id="prayer" type="number" min="1" max="2" step="0.01" value="1" inputmode="decimal">
+            </label>
+            <label class="field" id="spellField" hidden>
+              <span>Spell base XP</span>
+              <input id="spellxp" type="number" min="0" max="500" step="0.1" value="0" inputmode="decimal">
+            </label>
+            <label class="field">
+              <span>XP goal</span>
+              <input id="goal" type="number" min="0" max="200000000" step="1000" value="0" inputmode="numeric">
+            </label>
+          </div>
+        </details>
+      </form>
+
+      <p class="hint">All three spots share one clock. Sand and ammonite crabs only pay for the hitpoints they have left. Red numbers are the rest of the hit. The gemstone crab pays for the whole hit, at 87.5%. The graph is that same style XP.</p>
+      <footer>
+        <p>Sand crabs are 60 hitpoints. Ammonite crabs are 100 hitpoints and pay full XP. Both respawn after 30 seconds. Earth spells' 25% ammonite weakness is not included. The gemstone crab does not die. Space pauses. Figures follow the Old School RuneScape wiki.</p>
+      </footer>
+    </section>
+  </div>
+  <p class="sr" id="live" aria-live="polite"></p>
+  <noscript>This simulator needs JavaScript. It runs entirely in the browser.</noscript>
+  <script>
+    window.addEventListener("error", function (event) {
+      var el = document.getElementById("trouble");
+      if (!el) return;
+      el.hidden = false;
+      el.textContent = "Script error: " + event.message;
+    });
+  </script>
+  <script src="js/sim.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
