@@ -156,38 +156,44 @@ function expectedKill(hp, maxHit, accuracy) {
   return { attacks: expectAttacks[hp], overkill: expectWaste[hp], ok: true };
 }
 
-function sandTarget(crabs, resetTicks, activeTicks = AGGRESSION_TICKS) {
+function resetTiming(activeTicks, downTicks, activeJitter = 0, downJitter = 0) {
+  return {
+    activeTicks,
+    downTicks,
+    activeJitter: activeJitter > 0 ? activeJitter : 0,
+    downJitter: downJitter > 0 ? downJitter : 0,
+  };
+}
+
+function sandTarget(crabs, resetTicks, activeTicks = AGGRESSION_TICKS, activeJitter = 0, downJitter = 0) {
   return {
     infinite: false,
     hitpoints: SAND_HITPOINTS,
     respawn: SAND_RESPAWN_TICKS,
     xpMult: 1,
-    activeTicks,
-    downTicks: resetTicks,
+    ...resetTiming(activeTicks, resetTicks, activeJitter, downJitter),
     crabs,
   };
 }
 
-function ammoniteTarget(crabs, resetTicks, activeTicks = AGGRESSION_TICKS) {
+function ammoniteTarget(crabs, resetTicks, activeTicks = AGGRESSION_TICKS, activeJitter = 0, downJitter = 0) {
   return {
     infinite: false,
     hitpoints: AMMONITE_HITPOINTS,
     respawn: SAND_RESPAWN_TICKS,
     xpMult: 1,
-    activeTicks,
-    downTicks: resetTicks,
+    ...resetTiming(activeTicks, resetTicks, activeJitter, downJitter),
     crabs,
   };
 }
 
-function gemTarget(moveTicks, activeTicks = AGGRESSION_TICKS) {
+function gemTarget(moveTicks, activeTicks = AGGRESSION_TICKS, activeJitter = 0, downJitter = 0) {
   return {
     infinite: true,
     hitpoints: 0,
     respawn: 0,
     xpMult: GEM_XP_MULTIPLIER,
-    activeTicks,
-    downTicks: moveTicks,
+    ...resetTiming(activeTicks, moveTicks, activeJitter, downJitter),
     crabs: 0,
   };
 }
@@ -208,9 +214,14 @@ function defaultRoll(maxHit, accuracy, rng) {
   return Math.floor(rng() * (maxHit + 1));
 }
 
-function inDowntime(tick, active, down) {
-  if (down <= 0 || active <= 0) return false;
-  return tick % (active + down) >= active;
+// Spread is in ticks. The result stays inside base ± spread, and never below 0.
+// A base of 0 stays 0, so a skipped reset is not turned back on.
+function varyTicks(base, spread, rng) {
+  const start = base > 0 ? base : 0;
+  const span = spread > 0 ? Math.round(spread) : 0;
+  if (start === 0 || span === 0) return start;
+  const delta = Math.floor(rng() * (span * 2 + 1)) - span;
+  return Math.max(0, start + delta);
 }
 
 function assertFight(params, target, rng, checkTicks) {
@@ -251,14 +262,38 @@ function createFight(params, target, rng) {
   let focus = 0;
   let cooldown = 0;
   let tick = 0;
+  const resetsOn = target.activeTicks > 0 && target.downTicks > 0;
+  let windowStart = 0;
+  let windowActive = resetsOn ? varyTicks(target.activeTicks, target.activeJitter, rng) : 0;
+  let windowDown = resetsOn ? varyTicks(target.downTicks, target.downJitter, rng) : 0;
+
+  // Each reset rolls its own Every and Takes. Later calls for the same tick
+  // reuse that roll, so the countdown and the fight agree.
+  function advanceWindow(at) {
+    if (!resetsOn) return;
+    let guard = 0;
+    while (at >= windowStart + windowActive + windowDown) {
+      const next = windowStart + windowActive + windowDown;
+      if (next <= windowStart) return;
+      windowStart = next;
+      windowActive = varyTicks(target.activeTicks, target.activeJitter, rng);
+      windowDown = varyTicks(target.downTicks, target.downJitter, rng);
+      if (++guard > at + 2) return;
+    }
+  }
 
   function downtimeLeft(nextTick) {
-    const active = target.activeTicks;
-    const down = target.downTicks;
-    if (down <= 0 || active <= 0) return 0;
-    const pos = nextTick % (active + down);
-    if (pos < active) return 0;
-    return active + down - pos;
+    advanceWindow(nextTick);
+    if (windowDown <= 0 || windowActive <= 0) return 0;
+    const pos = nextTick - windowStart;
+    if (pos < windowActive) return 0;
+    return windowActive + windowDown - pos;
+  }
+
+  function isDown(at) {
+    advanceWindow(at);
+    if (!resetsOn || windowDown <= 0 || windowActive <= 0) return false;
+    return at >= windowStart + windowActive;
   }
 
   function step() {
@@ -285,7 +320,7 @@ function createFight(params, target, rng) {
       xpStyle: 0,
       xpHp: 0,
     };
-    if (inDowntime(t, target.activeTicks, target.downTicks)) {
+    if (isDown(t)) {
       stats.idleTicks++;
       cooldown = 0;
       event.phase = "down";
@@ -524,6 +559,132 @@ function compare(opts) {
   };
 }
 
+// One trial is the three spots on one clock, each with its own hit rolls.
+// Trial i uses seeds (seed + i*3), +1, and +2 so the spots stay independent.
+function monteCarloTrial(opts, index) {
+  const ticks = opts.ticks;
+  const params = {
+    maxHit: opts.maxHit,
+    attackSpeed: opts.attackSpeed,
+    accuracy: opts.accuracy,
+    style: opts.style,
+    spellXP: opts.spellXP,
+    ticks,
+  };
+  const seed = ((opts.seed >>> 0) + index * 3) >>> 0;
+  const gem = simulate(
+    params,
+    gemTarget(opts.gemMoveTicks, opts.gemActiveTicks, opts.gemActiveJitter, opts.gemDownJitter),
+    mulberry32(seed),
+  );
+  const sand = simulate(
+    params,
+    sandTarget(opts.crabs, opts.sandResetTicks, opts.sandActiveTicks, opts.sandActiveJitter, opts.sandDownJitter),
+    mulberry32(seed + 1),
+  );
+  const ammo = simulate(
+    params,
+    ammoniteTarget(opts.ammoCrabs, opts.ammoResetTicks, opts.ammoActiveTicks, opts.ammoActiveJitter, opts.ammoDownJitter),
+    mulberry32(seed + 2),
+  );
+  return {
+    gem: styleTotal(perHour(gem.xp, ticks)),
+    sand: styleTotal(perHour(sand.xp, ticks)),
+    ammo: styleTotal(perHour(ammo.xp, ticks)),
+  };
+}
+
+function quantile(sorted, p) {
+  const n = sorted.length;
+  if (n === 0) return 0;
+  if (n === 1) return sorted[0];
+  const idx = (n - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+function summarizeSeries(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  let sum = 0;
+  for (const value of sorted) sum += value;
+  const mean = n ? sum / n : 0;
+  let sq = 0;
+  for (const value of sorted) {
+    const delta = value - mean;
+    sq += delta * delta;
+  }
+  return {
+    n,
+    mean,
+    stdev: n > 1 ? Math.sqrt(sq / (n - 1)) : 0,
+    min: n ? sorted[0] : 0,
+    max: n ? sorted[n - 1] : 0,
+    p05: quantile(sorted, 0.05),
+    p50: quantile(sorted, 0.5),
+    p95: quantile(sorted, 0.95),
+  };
+}
+
+function ratesAreClose(value, best) {
+  if (best === 0) return true;
+  return (best - value) / best < 0.005;
+}
+
+function expectedStyleRates(opts) {
+  const params = {
+    maxHit: opts.maxHit,
+    attackSpeed: opts.attackSpeed,
+    accuracy: opts.accuracy,
+    style: opts.style,
+    spellXP: opts.spellXP,
+  };
+  const targets = {
+    gem: gemTarget(opts.gemMoveTicks, opts.gemActiveTicks),
+    sand: sandTarget(opts.crabs, opts.sandResetTicks, opts.sandActiveTicks),
+    ammo: ammoniteTarget(opts.ammoCrabs, opts.ammoResetTicks, opts.ammoActiveTicks),
+  };
+  const rates = {};
+  for (const key of ["gem", "sand", "ammo"]) {
+    const xp = steadyXPPerHour(params, targets[key]);
+    rates[key] = xp ? styleTotal(xp) : 0;
+  }
+  return rates;
+}
+
+function summarizeTrials(rows, opts) {
+  const samples = { gem: [], sand: [], ammo: [] };
+  const leaders = { gem: 0, sand: 0, ammo: 0, tie: 0 };
+  for (const row of rows) {
+    samples.gem.push(row.gem);
+    samples.sand.push(row.sand);
+    samples.ammo.push(row.ammo);
+    const best = Math.max(row.gem, row.sand, row.ammo);
+    const names = ["gem", "sand", "ammo"].filter((key) => ratesAreClose(row[key], best));
+    if (names.length === 1) leaders[names[0]]++;
+    else leaders.tie++;
+  }
+  return {
+    trials: rows.length,
+    gem: summarizeSeries(samples.gem),
+    sand: summarizeSeries(samples.sand),
+    ammo: summarizeSeries(samples.ammo),
+    leaders,
+    samples,
+    expected: opts ? expectedStyleRates(opts) : null,
+  };
+}
+
+function monteCarlo(opts) {
+  if (!Number.isInteger(opts.trials) || opts.trials < 1) throw new Error("Trials must be at least 1");
+  if (!Number.isInteger(opts.ticks) || opts.ticks < 1) throw new Error("Duration must be at least 1 tick");
+  const rows = [];
+  for (let i = 0; i < opts.trials; i++) rows.push(monteCarloTrial(opts, i));
+  return { ticks: opts.ticks, ...summarizeTrials(rows, opts) };
+}
+
 globalThis.CrabSim = {
   TICK_SECONDS,
   GEM_XP_MULTIPLIER,
@@ -534,10 +695,13 @@ globalThis.CrabSim = {
   ammoniteTarget,
   gemTarget,
   grant,
+  monteCarlo,
+  monteCarloTrial,
   mulberry32,
   perHour,
   sandTarget,
   simulate,
   styleTotal,
+  summarizeTrials,
 };
 })();

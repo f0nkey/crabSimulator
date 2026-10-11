@@ -15,10 +15,13 @@ const {
   ammoniteTarget,
   gemTarget,
   grant,
+  monteCarlo,
+  monteCarloTrial,
   mulberry32,
   sandTarget,
   simulate,
   styleTotal,
+  summarizeTrials,
 } = sandbox.CrabSim;
 
 test("grant matches the wiki rates", () => {
@@ -259,6 +262,73 @@ test("each spot can set its own reset window", () => {
   assert.equal(got.idleTicks, 4);
 });
 
+test("each reset wanders inside its ± band", () => {
+  const rolls = [0, 0, 0.9, 0.5];
+  let n = 0;
+  const rng = () => rolls[n++];
+  const target = gemTarget(4, 10, 1, 1);
+  assert.equal(target.activeJitter, 1);
+  assert.equal(target.downJitter, 1);
+  const got = simulate(
+    {
+      maxHit: 1,
+      attackSpeed: 1,
+      accuracy: 1,
+      style: "strength",
+      spellXP: 0,
+      ticks: 27,
+      roll: () => 1,
+    },
+    target,
+    rng,
+  );
+  assert.equal(got.idleTicks, 7);
+  assert.equal(got.attacks, 20);
+  assert.equal(n, 4);
+});
+
+test("a skipped reset stays off when ± is set", () => {
+  let calls = 0;
+  const rng = () => {
+    calls++;
+    return 0;
+  };
+  const got = simulate(
+    {
+      maxHit: 1,
+      attackSpeed: 1,
+      accuracy: 1,
+      style: "strength",
+      spellXP: 0,
+      ticks: 10,
+      roll: () => 1,
+    },
+    gemTarget(0, 10, 5, 5),
+    rng,
+  );
+  assert.equal(got.idleTicks, 0);
+  assert.equal(got.attacks, 10);
+  assert.equal(calls, 0);
+});
+
+test("reset jitter changes from one trial to the next", () => {
+  const params = {
+    maxHit: 1,
+    attackSpeed: 1,
+    accuracy: 1,
+    style: "strength",
+    spellXP: 0,
+    ticks: 80,
+  };
+  const a = simulate(params, gemTarget(6, 12, 4, 3), mulberry32(1));
+  const b = simulate(params, gemTarget(6, 12, 4, 3), mulberry32(2));
+  const fixed = simulate(params, gemTarget(6, 12), mulberry32(1));
+  const fixedAgain = simulate(params, gemTarget(6, 12), mulberry32(9));
+  assert.notEqual(a.idleTicks, b.idleTicks);
+  assert.equal(fixed.idleTicks, fixedAgain.idleTicks);
+  assert.ok(a.idleTicks > 0);
+});
+
 test("downtime window", () => {
   const target = gemTarget(0);
   target.activeTicks = 10;
@@ -355,11 +425,93 @@ test("stepping a fight matches a batch simulation", () => {
   assert.ok(Math.abs(gained - gemBatch.xp.strength) < 1e-6);
 });
 
+function monteOpts(extra) {
+  return {
+    maxHit: 1,
+    attackSpeed: 4,
+    accuracy: 1,
+    style: "strength",
+    spellXP: 0,
+    crabs: 3,
+    ammoCrabs: 3,
+    sandResetTicks: 0,
+    ammoResetTicks: 0,
+    gemMoveTicks: 0,
+    sandActiveTicks: 0,
+    ammoActiveTicks: 0,
+    gemActiveTicks: 0,
+    ticks: 6000,
+    trials: 40,
+    seed: 7,
+    ...extra,
+  };
+}
+
+test("summarizeTrials reports spread and who led", () => {
+  const report = summarizeTrials([
+    { gem: 10, sand: 30, ammo: 20 },
+    { gem: 12, sand: 28, ammo: 40 },
+    { gem: 11, sand: 29, ammo: 21 },
+  ]);
+  assert.equal(report.trials, 3);
+  assert.equal(report.gem.mean, 11);
+  assert.equal(report.gem.stdev, 1);
+  assert.equal(report.gem.min, 10);
+  assert.equal(report.gem.max, 12);
+  assert.equal(report.gem.p50, 11);
+  assert.equal(report.leaders.sand, 2);
+  assert.equal(report.leaders.ammo, 1);
+  assert.equal(report.leaders.gem, 0);
+  assert.equal(report.leaders.tie, 0);
+});
+
+test("a tie within half a percent is not a sole leader", () => {
+  const report = summarizeTrials([
+    { gem: 1000, sand: 1004, ammo: 900 },
+  ]);
+  assert.equal(report.leaders.tie, 1);
+  assert.equal(report.leaders.gem, 0);
+  assert.equal(report.leaders.sand, 0);
+});
+
+test("monte carlo mean sits on the gemstone steady rate", () => {
+  const opts = monteOpts();
+  const start = performance.now();
+  const report = monteCarlo(opts);
+  const ms = performance.now() - start;
+  assert.ok(ms < 3000, `monte carlo took ${ms.toFixed(0)}ms`);
+  assert.equal(report.trials, 40);
+  assert.ok(Math.abs(report.expected.gem - 2625) < 1e-6);
+  assert.ok(Math.abs(report.gem.mean - report.expected.gem) < 60, `gem mean ${report.gem.mean}`);
+  assert.ok(report.gem.stdev > 0);
+  assert.ok(Math.abs(report.sand.mean - report.expected.sand) < 80, `sand mean ${report.sand.mean}`);
+  assert.equal(report.leaders.gem, 0);
+  assert.equal(
+    report.leaders.sand + report.leaders.ammo + report.leaders.tie,
+    40,
+  );
+  const first = monteCarloTrial(opts, 0);
+  assert.equal(report.samples.gem[0], first.gem);
+  assert.equal(report.samples.sand[0], first.sand);
+  assert.equal(report.samples.ammo[0], first.ammo);
+  const again = monteCarlo(opts);
+  assert.equal(again.gem.mean, report.gem.mean);
+  assert.equal(again.samples.ammo[3], report.samples.ammo[3]);
+});
+
+test("monte carlo rejects an empty run", () => {
+  assert.throws(() => monteCarlo(monteOpts({ trials: 0 })), /Trials/);
+  assert.throws(() => monteCarlo(monteOpts({ ticks: 0 })), /Duration/);
+});
+
 test("github pages files stay relative", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(html, /href="css\/style\.css"/);
   assert.match(html, /src="js\/sim\.js"/);
   assert.match(html, /src="js\/app\.js"/);
+  assert.match(html, /id="tab-mc"/);
+  assert.match(html, /id="panel-mc"/);
+  assert.match(html, /id="mc-run"/);
   assert.equal(html.includes('src="/'), false);
   assert.equal(html.includes('href="/'), false);
   assert.equal(html.includes("type=\"module\""), false);

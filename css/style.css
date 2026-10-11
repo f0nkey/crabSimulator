@@ -95,12 +95,26 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .mark { width: 48px; height: 48px; flex: none; }
 
 .eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
   color: var(--muted);
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+.eyebrow a {
+  color: var(--gem-ink);
+  text-transform: none;
+  letter-spacing: 0;
+  text-decoration: none;
+}
+
+.eyebrow a:hover,
+.eyebrow a:focus-visible { text-decoration: underline; }
 
 h1, h2 { margin: 0; font-weight: 700; letter-spacing: -0.02em; }
 
@@ -415,13 +429,15 @@ h2 { font-size: 0.95rem; color: var(--muted); font-weight: 650; }
 
 #chart { width: 100%; height: 150px; display: block; }
 
-.deck {
+.deck, .mc {
   margin-top: 12px;
   background: var(--bg-raised);
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 12px;
 }
+
+.mc { margin-top: 0; }
 
 .speedbar {
   display: flex;
@@ -456,7 +472,96 @@ h2 { font-size: 0.95rem; color: var(--muted); font-weight: 650; }
 
 .speed-copy { margin: 8px 0 10px; }
 .speed-note, .trouble { margin: 0; font-size: 0.88rem; }
-.trouble { margin-top: 4px; }
+.trouble { margin: 8px 0 0; }
+.deck > .trouble { margin: 0 0 8px; }
+
+.viewtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.viewtabs button[aria-selected="true"] {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+  font-weight: 700;
+}
+
+.mc.is-running #mc-results { opacity: 0.45; }
+
+.mc-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+}
+
+.mc-controls .field { flex: 0 1 160px; }
+
+#mc-run {
+  background: var(--gem);
+  color: #10211f;
+  border-color: transparent;
+  font-weight: 700;
+}
+
+#mc-run[data-state="stop"] {
+  background: var(--sand);
+  color: #241c16;
+}
+
+.mc-status { flex: 1 1 100%; margin: 0; }
+
+.mc-progress {
+  margin-top: 12px;
+  height: 8px;
+  background: var(--bg-sunken);
+  border-radius: 99px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.mc-progress span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--gem);
+}
+
+.mc-scroll { overflow-x: auto; }
+
+.mc-table {
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-table th,
+.mc-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.mc-table thead th {
+  color: var(--muted);
+  font-weight: 650;
+  font-size: 0.82rem;
+}
+
+.mc-gem { color: var(--gem-ink); }
+.mc-sand { color: var(--sand-ink); }
+.mc-ammo { color: var(--ammo-ink); }
+
+.mc-note { margin: 8px 0 0; font-size: 0.85rem; }
+
+#mc-chart { width: 100%; height: 148px; display: block; margin-top: 12px; }
+
+#mc-chart text { font-family: "Segoe UI", "Helvetica Neue", sans-serif; }
 
 .hint { margin: 8px 0 0; font-size: 0.88rem; }
 
@@ -590,6 +695,36 @@ footer p { margin: 0 0 6px; }
   .topbar { grid-template-columns: 1fr auto; }
   .clockblock { grid-column: 1 / -1; text-align: left; }
   .race { width: 120px; }
+
+  .mc-table thead { display: none; }
+
+  .mc-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    padding: 8px 0 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mc-table th[scope="row"] {
+    grid-column: 1 / -1;
+    border: 0;
+    padding: 0;
+  }
+
+  .mc-table td {
+    border: 0;
+    padding: 0;
+    white-space: normal;
+  }
+
+  .mc-table td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
 }
 
 @media (max-width: 560px) {
@@ -603,12 +738,22 @@ footer p { margin: 0 0 6px; }
   .game {
     height: 100%;
     display: grid;
-    grid-template-rows: auto auto auto minmax(180px, 1fr) auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr) minmax(140px, 32dvh);
     padding-bottom: 10px;
+    overflow: hidden;
+  }
+  .panels {
+    min-height: 0;
     overflow: auto;
   }
-  .scene { min-height: 120px; }
-  .deck { max-height: 30dvh; overflow: auto; }
+  #panel-live {
+    min-height: 100%;
+    display: grid;
+    grid-template-rows: auto auto minmax(240px, 1fr) auto;
+  }
+  .stage { min-height: 240px; }
+  .scene { min-height: 180px; }
+  .deck { min-height: 0; max-height: none; overflow: auto; }
   #chart { height: 118px; }
 }
 

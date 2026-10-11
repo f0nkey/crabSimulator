@@ -5,9 +5,11 @@ const {
   crabAccuracy,
   createFight,
   gemTarget,
+  monteCarloTrial,
   mulberry32,
   sandTarget,
   styleTotal,
+  summarizeTrials,
 } = globalThis.CrabSim;
 
 const STYLE_NAME = {
@@ -45,6 +47,12 @@ let last = 0;
 let liveAt = 0;
 let actorStyle = "";
 let formTimer = 0;
+let mcRunId = 0;
+let mcTimer = 0;
+let mcRows = [];
+let mcSetup = null;
+let lastMcKey = "";
+let mcDoneStatus = "";
 
 function crabSVG(kind) {
   const palettes = {
@@ -146,6 +154,12 @@ function fightKey(value) {
     sandActiveTicks: value.sandActiveTicks,
     ammoActiveTicks: value.ammoActiveTicks,
     gemActiveTicks: value.gemActiveTicks,
+    sandActiveJitter: value.sandActiveJitter,
+    sandDownJitter: value.sandDownJitter,
+    ammoActiveJitter: value.ammoActiveJitter,
+    ammoDownJitter: value.ammoDownJitter,
+    gemActiveJitter: value.gemActiveJitter,
+    gemDownJitter: value.gemDownJitter,
   });
 }
 
@@ -161,9 +175,21 @@ function startFights(next) {
     style: next.style,
     spellXP: next.spellXP,
   };
-  gemFight = createFight(params, gemTarget(next.gemMoveTicks, next.gemActiveTicks), mulberry32(1));
-  sandFight = createFight(params, sandTarget(next.crabs, next.sandResetTicks, next.sandActiveTicks), mulberry32(2));
-  ammoFight = createFight(params, ammoniteTarget(next.ammoCrabs, next.ammoResetTicks, next.ammoActiveTicks), mulberry32(3));
+  gemFight = createFight(
+    params,
+    gemTarget(next.gemMoveTicks, next.gemActiveTicks, next.gemActiveJitter, next.gemDownJitter),
+    mulberry32(1),
+  );
+  sandFight = createFight(
+    params,
+    sandTarget(next.crabs, next.sandResetTicks, next.sandActiveTicks, next.sandActiveJitter, next.sandDownJitter),
+    mulberry32(2),
+  );
+  ammoFight = createFight(
+    params,
+    ammoniteTarget(next.ammoCrabs, next.ammoResetTicks, next.ammoActiveTicks, next.ammoActiveJitter, next.ammoDownJitter),
+    mulberry32(3),
+  );
   opts = next;
   $("gem-floats").replaceChildren();
   $("sand-floats").replaceChildren();
@@ -173,6 +199,276 @@ function startFights(next) {
   samples = [];
   if (actorStyle !== next.style) paintActors(next.style);
   acc = 0;
+}
+
+function showTab(name) {
+  const mc = name === "mc";
+  $("tab-live").setAttribute("aria-selected", String(!mc));
+  $("tab-mc").setAttribute("aria-selected", String(mc));
+  $("tab-live").tabIndex = mc ? -1 : 0;
+  $("tab-mc").tabIndex = mc ? 0 : -1;
+  $("panel-live").hidden = mc;
+  $("panel-mc").hidden = !mc;
+  document.body.classList.toggle("is-mc", mc);
+}
+
+function mcKey(setup) {
+  return `${fightKey(setup)}|${setup.trials}|${setup.ticks}`;
+}
+
+function readMc() {
+  const trials = readNum("mcTrials", 1, Infinity);
+  const ticks = readNum("mcLength", 1, 12000);
+  if (!trials.ok || !Number.isInteger(trials.value)) {
+    return { ok: false, error: "Enter a whole number of trials, at least 1." };
+  }
+  if (!ticks.ok || !Number.isInteger(ticks.value)) {
+    return { ok: false, error: "Choose how long each trial lasts." };
+  }
+  return { ok: true, trials: trials.value, ticks: ticks.value };
+}
+
+function currentSetup() {
+  const parsed = readForm();
+  const length = readMc();
+  if (!parsed.ok) return parsed;
+  if (!length.ok) return length;
+  return {
+    ok: true,
+    setup: { ...parsed.opts, trials: length.trials, ticks: length.ticks },
+  };
+}
+
+function mcStale() {
+  if (!lastMcKey || $("mc-results").hidden) return true;
+  const current = currentSetup();
+  if (!current.ok) return true;
+  return mcKey(current.setup) !== lastMcKey;
+}
+
+function lengthLabel(ticks) {
+  const seconds = ticks * TICK_SECONDS;
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
+function resetMcButton(status) {
+  clearTimeout(mcTimer);
+  $("mc-run").textContent = "Run";
+  $("mc-run").dataset.state = "run";
+  $("panel-mc").classList.remove("is-running");
+  $("panel-mc").setAttribute("aria-busy", "false");
+  $("mc-progress").hidden = true;
+  if (status) $("mc-status").textContent = status;
+}
+
+function cancelMonteCarlo() {
+  if ($("mc-run").dataset.state !== "stop") return;
+  mcRunId++;
+  resetMcButton(
+    $("mc-results").hidden
+      ? "Click Run to simulate the fight setup below many times, each with a new set of hit rolls."
+      : mcDoneStatus,
+  );
+}
+
+function stopMonteCarlo() {
+  if ($("mc-run").dataset.state !== "stop") return;
+  mcRunId++;
+  clearTimeout(mcTimer);
+  if (mcRows.length > 0) completeMonteCarlo(true);
+  else resetMcButton("Stopped.");
+}
+
+function noteMcStale() {
+  if ($("mc-run").dataset.state === "stop") return;
+  if ($("mc-results").hidden) return;
+  const current = currentSetup();
+  if (!current.ok) {
+    $("mc-status").textContent = current.error;
+    return;
+  }
+  $("mc-status").textContent = mcKey(current.setup) === lastMcKey
+    ? mcDoneStatus
+    : "Setup changed. Click Run to use it.";
+}
+
+function startMonteCarlo() {
+  const current = currentSetup();
+  if (!current.ok) {
+    $("trouble").hidden = false;
+    $("trouble").textContent = current.error;
+    $("mc-status").textContent = current.error;
+    return;
+  }
+  $("trouble").hidden = true;
+  const run = ++mcRunId;
+  clearTimeout(mcTimer);
+  mcRows = [];
+  mcSetup = { ...current.setup, seed: Math.floor(Math.random() * 0x7fffffff) };
+  $("panel-mc").classList.add("is-running");
+  $("panel-mc").setAttribute("aria-busy", "true");
+  $("mc-progress").hidden = false;
+  $("mc-bar").style.width = "0%";
+  $("mc-run").textContent = "Stop";
+  $("mc-run").dataset.state = "stop";
+  const label = lengthLabel(mcSetup.ticks);
+  $("mc-status").textContent = `Running trial 0 of ${mcSetup.trials}. Each trial is ${label}.`;
+
+  const batch = () => {
+    if (run !== mcRunId) return;
+    const started = performance.now();
+    try {
+      while (mcRows.length < mcSetup.trials && performance.now() - started < 24) {
+        mcRows.push(monteCarloTrial(mcSetup, mcRows.length));
+      }
+    } catch (err) {
+      if (run !== mcRunId) return;
+      mcRunId++;
+      $("trouble").hidden = false;
+      $("trouble").textContent = err.message;
+      resetMcButton(err.message);
+      return;
+    }
+    $("mc-bar").style.width = `${(mcRows.length / mcSetup.trials) * 100}%`;
+    $("mc-status").textContent = `Running trial ${mcRows.length} of ${mcSetup.trials}. Each trial is ${label}.`;
+    if (mcRows.length < mcSetup.trials) {
+      mcTimer = setTimeout(batch, 0);
+      return;
+    }
+    completeMonteCarlo(false);
+  };
+  mcTimer = setTimeout(batch, 0);
+}
+
+function completeMonteCarlo(stopped) {
+  const report = summarizeTrials(mcRows, mcSetup);
+  paintMonteCarlo(report);
+  lastMcKey = mcKey(mcSetup);
+  const label = lengthLabel(mcSetup.ticks);
+  const lead = $("mc-lead").textContent;
+  mcDoneStatus = stopped
+    ? `Stopped after ${report.trials} of ${mcSetup.trials} trials, ${label} each. Seed ${mcSetup.seed}.`
+    : `${report.trials} trials, ${label} each. Seed ${mcSetup.seed}.`;
+  resetMcButton(mcDoneStatus);
+  $("mc-results").hidden = false;
+  $("live").textContent = `${mcDoneStatus} ${lead}`;
+}
+
+function aheadText(count, trials) {
+  if (trials <= 0) return "0%";
+  return `${Math.round((count / trials) * 100)}%`;
+}
+
+function leaderSentence(report, name) {
+  const n = report.trials;
+  let text =
+    `${name} XP per hour. The gemstone crab led ${report.leaders.gem} of ${n} trials. ` +
+    `Sand crabs led ${report.leaders.sand}. Ammonite crabs led ${report.leaders.ammo}.`;
+  if (report.leaders.tie > 0) {
+    const word = report.leaders.tie === 1 ? "was a tie" : "were ties";
+    text += ` ${report.leaders.tie} ${word}.`;
+  }
+  return text;
+}
+
+function paintMonteCarlo(report) {
+  const labels = {
+    mean: "Mean XP/h",
+    range: "5th to 95th",
+    ahead: "Ahead",
+    steady: "No-wait XP/h",
+  };
+  for (const key of ["gem", "sand", "ammo"]) {
+    const fields = {
+      mean: formatInt(report[key].mean),
+      range: `${formatInt(report[key].p05)} to ${formatInt(report[key].p95)}`,
+      ahead: aheadText(report.leaders[key], report.trials),
+      steady: formatInt(report.expected[key]),
+    };
+    for (const [field, text] of Object.entries(fields)) {
+      const cell = $(`mc-${key}-${field}`);
+      cell.textContent = text;
+      cell.setAttribute("aria-label", `${labels[field]} ${text}`);
+    }
+  }
+  paintMcChart(report);
+  const samples = report.samples.gem.concat(report.samples.sand, report.samples.ammo);
+  const lo = Math.min(...samples);
+  const hi = Math.max(...samples);
+  const name = STYLE_NAME[mcSetup.style] || "Style";
+  $("mc-caption").textContent =
+    `Each bar counts trials in that ${name} XP per hour band, from ${formatInt(lo)} to ${formatInt(hi)}. The white line is the mean. ` +
+    "No-wait XP/h skips respawn gaps.";
+  $("mc-lead").textContent = leaderSentence(report, name);
+}
+
+function paintMcChart(report) {
+  const svg = $("mc-chart");
+  const keys = ["gem", "sand", "ammo"];
+  const names = { gem: "Gemstone", sand: "Sand", ammo: "Ammonite" };
+  const samples = [];
+  for (const key of keys) for (const value of report.samples[key]) samples.push(value);
+  let lo = Math.min(...samples);
+  let hi = Math.max(...samples);
+  if (!(hi > lo)) {
+    lo -= 1;
+    hi += 1;
+  }
+  const bins = 28;
+  const counts = {};
+  let peak = 1;
+  for (const key of keys) {
+    counts[key] = new Array(bins).fill(0);
+    for (const value of report.samples[key]) {
+      let bin = Math.floor(((value - lo) / (hi - lo)) * bins);
+      if (bin < 0) bin = 0;
+      if (bin >= bins) bin = bins - 1;
+      counts[key][bin]++;
+      if (counts[key][bin] > peak) peak = counts[key][bin];
+    }
+  }
+  const width = 720;
+  const labelW = 96;
+  const padR = 8;
+  const bandH = 44;
+  const gap = 8;
+  const top = 4;
+  svg.replaceChildren();
+  keys.forEach((key, row) => {
+    const y0 = top + row * (bandH + gap);
+    const text = document.createElementNS(SVG_NS, "text");
+    text.setAttribute("x", "0");
+    text.setAttribute("y", String(y0 + 26));
+    text.setAttribute("fill", CHART_COLOR[key]);
+    text.setAttribute("font-size", "14");
+    text.textContent = names[key];
+    svg.append(text);
+    const plotW = width - labelW - padR;
+    const barW = plotW / bins;
+    for (let bin = 0; bin < bins; bin++) {
+      const h = (counts[key][bin] / peak) * (bandH - 6);
+      if (h <= 0) continue;
+      const rect = document.createElementNS(SVG_NS, "rect");
+      rect.setAttribute("x", (labelW + bin * barW).toFixed(1));
+      rect.setAttribute("y", (y0 + bandH - h).toFixed(1));
+      rect.setAttribute("width", Math.max(1, barW - 1.2).toFixed(1));
+      rect.setAttribute("height", h.toFixed(1));
+      rect.setAttribute("fill", CHART_COLOR[key]);
+      rect.setAttribute("rx", "1");
+      svg.append(rect);
+    }
+    const meanX = labelW + ((report[key].mean - lo) / (hi - lo)) * plotW;
+    svg.append(chartLine(meanX, y0 + 2, meanX, y0 + bandH, "#f6efe4", "2"));
+  });
+  svg.setAttribute(
+    "aria-label",
+    `Style XP per hour across ${report.trials} trials. Gemstone mean ${formatInt(report.gem.mean)}, sand ${formatInt(report.sand.mean)}, ammonite ${formatInt(report.ammo.mean)}.`,
+  );
 }
 
 function init() {
@@ -208,8 +504,34 @@ function init() {
     if (!button) return;
     setSpeed(Number(button.dataset.speed));
   });
+  $("tab-live").addEventListener("click", () => {
+    showTab("live");
+    cancelMonteCarlo();
+  });
+  $("tab-mc").addEventListener("click", () => {
+    const selected = $("tab-mc").getAttribute("aria-selected") === "true";
+    showTab("mc");
+    if (selected || $("mc-results").hidden || mcStale()) startMonteCarlo();
+  });
+  $("mc-run").addEventListener("click", () => {
+    if ($("mc-run").dataset.state === "stop") stopMonteCarlo();
+    else startMonteCarlo();
+  });
+  $("mcTrials").addEventListener("input", noteMcStale);
+  $("mcLength").addEventListener("change", noteMcStale);
+  document.querySelector(".viewtabs").addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    const tabs = [$("tab-live"), $("tab-mc")];
+    const index = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
+    const next = event.key === "ArrowRight" ? Math.min(tabs.length - 1, index + 1) : Math.max(0, index - 1);
+    if (next === index) return;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  });
   document.addEventListener("keydown", (event) => {
     if (event.code !== "Space") return;
+    if (document.body.classList.contains("is-mc")) return;
     if (event.target.closest("input, select, textarea")) return;
     event.preventDefault();
     setPaused(!paused);
@@ -260,6 +582,7 @@ function applyForm() {
   if (!parsed.ok) {
     $("trouble").hidden = false;
     $("trouble").textContent = parsed.error;
+    noteMcStale();
     return;
   }
   $("trouble").hidden = true;
@@ -267,6 +590,7 @@ function applyForm() {
   if (opts && fightKey(opts) === fightKey(parsed.opts)) {
     opts = parsed.opts;
     render(blankFrame());
+    noteMcStale();
     return;
   }
   try {
@@ -276,12 +600,14 @@ function applyForm() {
     $("trouble").hidden = false;
     $("trouble").textContent = err.message;
   }
+  noteMcStale();
 }
 
 function loop(now) {
   if (!last) last = now;
   let frame = null;
-  if (!paused && gemFight && sandFight && ammoFight) {
+  const onMonteCarlo = document.body.classList.contains("is-mc");
+  if (!paused && !onMonteCarlo && gemFight && sandFight && ammoFight) {
     acc += Math.min(250, now - last);
     const tickMs = (TICK_SECONDS * 1000) / speed;
     const gem = [];
@@ -300,7 +626,7 @@ function loop(now) {
   }
   last = now;
   if (frame) render(frame);
-  if (gemFight && now - liveAt > 1000) {
+  if (!onMonteCarlo && gemFight && now - liveAt > 1000) {
     liveAt = now;
     $("live").textContent = `${$("clock").textContent}. ${$("lead").textContent}`;
   }
@@ -621,11 +947,22 @@ function readForm() {
   const sandEvery = readNum("sandEvery", 0, 120);
   const ammoEvery = readNum("ammoEvery", 0, 120);
   const gemEvery = readNum("gemEvery", 0, 120);
+  const gemEveryJitter = readNum("gemEveryJitter", 0, 120);
+  const gemTakeJitter = readNum("gemTakeJitter", 0, 120);
+  const sandEveryJitter = readNum("sandEveryJitter", 0, 120);
+  const sandTakeJitter = readNum("sandTakeJitter", 0, 120);
+  const ammoEveryJitter = readNum("ammoEveryJitter", 0, 120);
+  const ammoTakeJitter = readNum("ammoTakeJitter", 0, 120);
   const goal = readNum("goal", 0, 200_000_000);
   const spellXP = readNum("spellxp", 0, 500);
   const style = $("style").value;
   if (!STYLE_NAME[style]) return { ok: false, error: "Choose a combat style." };
-  if (![maxHit, attackSpeed, crabs, ammoCrabs, sandReset, ammoReset, gemMove, sandEvery, ammoEvery, gemEvery, goal, spellXP].every((item) => item.ok)) {
+  const numbers = [
+    maxHit, attackSpeed, crabs, ammoCrabs, sandReset, ammoReset, gemMove,
+    sandEvery, ammoEvery, gemEvery, goal, spellXP,
+    gemEveryJitter, gemTakeJitter, sandEveryJitter, sandTakeJitter, ammoEveryJitter, ammoTakeJitter,
+  ];
+  if (!numbers.every((item) => item.ok)) {
     return { ok: false, error: "Enter numbers inside the allowed ranges." };
   }
   const mode = document.querySelector('input[name="accMode"]:checked').value;
@@ -666,6 +1003,12 @@ function readForm() {
       sandActiveTicks: secondsToTicks(sandEvery.value * 60),
       ammoActiveTicks: secondsToTicks(ammoEvery.value * 60),
       gemActiveTicks: secondsToTicks(gemEvery.value * 60),
+      sandActiveJitter: secondsToTicks(sandEveryJitter.value),
+      sandDownJitter: secondsToTicks(sandTakeJitter.value),
+      ammoActiveJitter: secondsToTicks(ammoEveryJitter.value),
+      ammoDownJitter: secondsToTicks(ammoTakeJitter.value),
+      gemActiveJitter: secondsToTicks(gemEveryJitter.value),
+      gemDownJitter: secondsToTicks(gemTakeJitter.value),
       goal: goal.value,
     },
   };

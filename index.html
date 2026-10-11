@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <a class="skip" href="#stage">Skip to the fights</a>
+  <a class="skip" href="#panels">Skip to the simulator</a>
   <div class="game">
     <header class="topbar">
       <div class="brand">
@@ -24,7 +24,7 @@
           <circle cx="38" cy="34" r="2" fill="#1a1612"/>
         </svg>
         <div>
-          <p class="eyebrow">Old School RuneScape</p>
+          <p class="eyebrow">Old School RuneScape <a href="https://github.com/f0nkey/crabSimulator">GitHub</a></p>
           <h1>Crab XP</h1>
         </div>
       </div>
@@ -39,6 +39,13 @@
       </div>
     </header>
 
+    <div class="viewtabs" role="tablist" aria-label="Views">
+      <button id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="panel-live" tabindex="0">Fights</button>
+      <button id="tab-mc" type="button" role="tab" aria-selected="false" aria-controls="panel-mc" tabindex="-1">Monte Carlo</button>
+    </div>
+
+    <div class="panels" id="panels">
+    <div id="panel-live" role="tabpanel" aria-labelledby="tab-live">
     <div class="speedbar">
       <button id="play" type="button">Pause</button>
       <button id="step" type="button" title="Advance all three fights by one game tick">1 tick</button>
@@ -57,7 +64,6 @@
     </div>
     <div class="speed-copy">
       <p id="speedNote" class="speed-note">10×. One game hour takes 6 min.</p>
-      <p id="trouble" class="trouble" hidden></p>
     </div>
 
     <main id="stage" class="stage">
@@ -138,8 +144,74 @@
       </div>
       <svg id="chart" viewBox="0 0 720 180" role="img" aria-label="Style XP for the gemstone crab, sand crabs, and ammonite crabs"></svg>
     </section>
+    </div>
+
+    <section id="panel-mc" class="mc" role="tabpanel" aria-labelledby="tab-mc" hidden>
+      <div class="mc-controls">
+        <label class="field">
+          <span>Trials</span>
+          <input id="mcTrials" type="number" min="1" value="100" inputmode="numeric">
+        </label>
+        <label class="field">
+          <span>Each trial</span>
+          <select id="mcLength">
+            <option value="1000">10 minutes</option>
+            <option value="3000">30 minutes</option>
+            <option value="6000" selected>1 hour</option>
+            <option value="12000">2 hours</option>
+          </select>
+        </label>
+        <button id="mc-run" type="button" data-state="run">Run</button>
+        <p id="mc-status" class="mc-status">Click this tab to run the fight setup below many times, each with a new set of hit rolls.</p>
+      </div>
+      <div class="mc-progress" id="mc-progress" hidden><span id="mc-bar"></span></div>
+      <div id="mc-results" hidden>
+        <svg id="mc-chart" viewBox="0 0 720 152" role="img" aria-label="Spread of style XP per hour"></svg>
+        <p id="mc-caption" class="mc-note"></p>
+        <p id="mc-lead" class="mc-note"></p>
+        <div class="mc-scroll">
+          <table class="mc-table">
+            <thead>
+              <tr>
+                <th scope="col">Spot</th>
+                <th scope="col">Mean XP/h</th>
+                <th scope="col">5th to 95th</th>
+                <th scope="col">Ahead</th>
+                <th scope="col">No-wait XP/h</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row" class="mc-gem">Gemstone crab</th>
+                <td id="mc-gem-mean" data-label="Mean XP/h"></td>
+                <td id="mc-gem-range" data-label="5th to 95th"></td>
+                <td id="mc-gem-ahead" data-label="Ahead"></td>
+                <td id="mc-gem-steady" data-label="No-wait XP/h"></td>
+              </tr>
+              <tr>
+                <th scope="row" class="mc-sand">Sand crabs</th>
+                <td id="mc-sand-mean" data-label="Mean XP/h"></td>
+                <td id="mc-sand-range" data-label="5th to 95th"></td>
+                <td id="mc-sand-ahead" data-label="Ahead"></td>
+                <td id="mc-sand-steady" data-label="No-wait XP/h"></td>
+              </tr>
+              <tr>
+                <th scope="row" class="mc-ammo">Ammonite crabs</th>
+                <td id="mc-ammo-mean" data-label="Mean XP/h"></td>
+                <td id="mc-ammo-range" data-label="5th to 95th"></td>
+                <td id="mc-ammo-ahead" data-label="Ahead"></td>
+                <td id="mc-ammo-steady" data-label="No-wait XP/h"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mc-note">No-wait XP/h is the steady rate when a crab is always in reach. It skips respawn gaps and the ± on resets. The trials still include respawn waits, reset walks, and that wander. Ahead means that spot led by at least 0.5%.</p>
+      </div>
+    </section>
+    </div>
 
     <section class="deck" aria-label="Fight setup">
+      <p id="trouble" class="trouble" hidden></p>
       <form id="controls" autocomplete="off">
         <div class="setup">
           <div class="field">
@@ -194,6 +266,14 @@
               <span>Takes (seconds)</span>
               <input id="gemMove" type="number" min="0" max="120" step="0.1" value="20" inputmode="decimal">
             </label>
+            <label class="field">
+              <span>Every ± (sec)</span>
+              <input id="gemEveryJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Takes ± (sec)</span>
+              <input id="gemTakeJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
+            </label>
           </div>
           <div class="reset-pair sand">
             <p class="reset-name">Sand reset</p>
@@ -204,6 +284,14 @@
             <label class="field">
               <span>Takes (seconds)</span>
               <input id="sandReset" type="number" min="0" max="120" step="0.1" value="15" inputmode="decimal">
+            </label>
+            <label class="field">
+              <span>Every ± (sec)</span>
+              <input id="sandEveryJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Takes ± (sec)</span>
+              <input id="sandTakeJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
             </label>
           </div>
           <div class="reset-pair ammo">
@@ -216,9 +304,17 @@
               <span>Takes (seconds)</span>
               <input id="ammoReset" type="number" min="0" max="120" step="0.1" value="15" inputmode="decimal">
             </label>
+            <label class="field">
+              <span>Every ± (sec)</span>
+              <input id="ammoEveryJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Takes ± (sec)</span>
+              <input id="ammoTakeJitter" type="number" min="0" max="120" step="1" value="0" inputmode="numeric">
+            </label>
           </div>
         </div>
-        <p class="reset-note">Every is how long they stay aggressive. Takes is the time spent resetting. 0 skips that reset.</p>
+        <p class="reset-note">Every is how long they stay aggressive. Takes is the time spent resetting. 0 skips that reset. ± is how many seconds that time can wander, either way, on each reset.</p>
 
         <details class="more">
           <summary>Accuracy and goal</summary>
